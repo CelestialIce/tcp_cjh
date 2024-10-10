@@ -38,6 +38,7 @@ struct Index {
   @State received_count: number = 0;
   @State sequence_number: number = 0; // Initialize sequence_number
   @State heartbeat_count: number = 0;
+  @State isBreak: number = 0;
   @State linkBreak: number = 0
   @State delay: number = 0
   @State showToken: string = '';
@@ -45,6 +46,9 @@ struct Index {
   @State receive: number = 0 //已接受的序号
   // @State rate: number = this.receive / 200.0
   private delays: HashMap<number, number> = new HashMap();
+  private isReconnectEnabled = false;
+  private heartbeatTimer: number | undefined;
+  private reconnectTimer: number | undefined;
   previousPort: number = 0;
   heartbeatInterval: number = 30000; // 初始心跳间隔为30秒
   maxHeartbeatInterval: number = 60000; // 最大心跳间隔为60秒
@@ -55,28 +59,41 @@ struct Index {
     port: 9999,
     family: 1
   };
+
   adjustHeartbeatInterval(success: boolean) {
-  if (success) {
-    this.heartbeatInterval = Math.min(this.heartbeatInterval + 5000, this.maxHeartbeatInterval);
-  } else {
-    this.heartbeatInterval = Math.max(this.heartbeatInterval - 5000, this.minHeartbeatInterval);
+    if (success) {
+      this.heartbeatInterval = Math.min(this.heartbeatInterval + 5000, this.maxHeartbeatInterval);
+    } else {
+      this.heartbeatInterval = Math.max(this.heartbeatInterval - 5000, this.minHeartbeatInterval);
+    }
   }
-}
 
   startHeartbeat() {
-    setInterval(() => {
+    this.heartbeatTimer = setInterval(() => {
       tcp.getState().then((data: socket.SocketStateBase) => {
         if (!data.isConnected) {
           this.status = '断开连接，重新连接中';
-          this.linkBreak += 1;
-          this.tcpConnect();
+
+          if (!this.isBreak) {
+            // this.linkBreak += 1; // Increment only if it's a new disconnection
+            this.isBreak = 1; // Mark that the connection is broken
+          }
+
+          this.tcpConnect(); // Attempt to reconnect
         } else {
+          if (this.isBreak) {
+            this.isBreak = 0; // Reset the flag when the connection is restored
+          }
           this.sendHeartbeat();
         }
       }).catch((err: BusinessError) => {
         this.status = '检查连接状态失败';
       });
     }, this.heartbeatInterval);
+    //
+    // setInterval(() => {
+    //
+    // }, this.heartbeatInterval);
   }
 
   sendHeartbeat() {
@@ -110,13 +127,13 @@ struct Index {
     });
   }
 
-
   tcpConnect() {
     tcp.on('message', (value: socket.SocketMessageInfo) => {
       this.message_recv = this.resolveArrayBuffer(value.message)
       this.receive += 1
       let obj = JSON.parse(this.message_recv);
       this.delay = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, false) - (obj as object)?.['time'];
+      this.linkBreak =(obj as object)?.['break'];
       if (this.delays.hasKey(this.delay)) {
         this.delays.set(this.delay, this.delays.get(this.delay) + 1)
       } else {
@@ -125,7 +142,7 @@ struct Index {
     });
     tcp.on('close', () => {
       this.status = '已断开';
-      this.linkBreak += 1
+      // this.linkBreak += 1
       console.info("on close success");
     });
 
@@ -139,19 +156,103 @@ struct Index {
       this.sendHeartbeat();
     }).catch((err: BusinessError) => {
       this.status = '连接失败';
+      // 在连接失败时，启动重连机制
+      this.reconnectTimer = setInterval(() => {
+        if (this.status !== '已连接' && this.isReconnectEnabled) {
+          this.tcpClose();
+          this.tcpConnect();
+        }
+      }, 3000); // 重试间隔时间// 自动重试逻辑，延迟 5 秒后重新尝试连接
+
+
+      // setInterval(() => {
+      //   if (this.status !== '已连接' && this.isReconnectEnabled) {
+      //     this.tcpClose();
+      //     this.tcpConnect();
+      //   }
+      // }, 3000); // 5秒后重试连接，可以根据需要调整时间
     });
   }
 
   tcpClose() {
     tcp.close().then(() => {
       console.log('close success');
-      this.status = "已断开"
+      this.status = "已断开";
+      // 清理计时器
+      if (this.heartbeatTimer) {
+        clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = undefined;
+      }
+      if (this.reconnectTimer) {
+        clearInterval(this.reconnectTimer);
+        this.reconnectTimer = undefined;
+      }
     }).catch((err: BusinessError) => {
       console.log('close fail');
     });
     tcp.off('message');
     tcp.off('connect');
     tcp.off('close');
+  }
+
+  onDestroy() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+    if (this.reconnectTimer) {
+      clearInterval(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+  }
+
+  private getNetworkSceneOn = async () => {
+    try {
+      netQuality.on('netSceneChange', (list: Array<netQuality.NetworkScene>) => {
+        hilog.info(0x0000, 'testTag', 'on receive netSceneChange event');
+        if (list.length > 0) {
+          list.forEach((sc) => {
+            // 回调信息处理
+            console.info(`Succeeded receive netSceneChange info`);
+            if (sc.scene == 'weakSignal') {
+              // 弱信号预测处理
+              if (sc.pathType == 0) {
+                sc.pathType = 2
+              }
+            }
+          });
+        }
+      });
+      try {
+        netQuality.on('netQosChange', (list: Array<netQuality.NetworkQos>) => {
+          if (list.length > 0) {
+            list.forEach((qos) => {
+              // 回调信息处理
+              console.info(`Succeeded receive netQosChange info`);
+            });
+          }
+        });
+      } catch (err) {
+        console.error('errCode: ' + (err as BusinessError).code + ', errMessage: ' + (err as BusinessError).message);
+      }
+      hilog.info(0x0000, 'testTag', 'on--success');
+      this.content = `on--success`;
+    } catch (err) {
+      let e: BusinessError = err as BusinessError;
+      this.content = `on--err` + JSON.stringify(err);
+      hilog.error(0x0000, 'testTag', 'on netSceneChange error: %{public}d %{public}s', e.code, e.message);
+    }
+  }
+  private getNetworkSceneOff = async () => {
+    try {
+      netQuality.off('netSceneChange');
+      hilog.info(0x0000, 'testTag', 'off--success');
+      this.content = `off--success`;
+    } catch (err) {
+      let e: BusinessError = err as BusinessError;
+      this.content = `off--err` + JSON.stringify(err);
+      hilog.error(0x0000, 'testTag', 'off netSceneChange error: %{public}d %{public}s', e.code, e.message);
+    }
   }
 
   resolveArrayBuffer(message: ArrayBuffer): string {
@@ -208,13 +309,13 @@ struct Index {
           .width('100%')
           .margin({ top: 5 })
           .textAlign(TextAlign.Center);
-        Text(`已接收信息: ${String(this.receive)}`)
+        Text(`已接收信息: ${String(this.receive)}, 发送的心跳包：${String(this.heartbeat_count)}`)
           .fontSize(25)
           .width('100%')
           .margin({ top: 5 })
           .textAlign(TextAlign.Center);
 
-        Text(`目前接收消息比率: ${( 1 > 0 ? (this.receive/200.0).toFixed(2) :'0')}%`)
+        Text(`目前接收消息比率: ${(1 > 0 ? (this.receive / 2.0).toFixed(2) : '0')}%`)
           .fontSize(25)
           .width('100%')
           .margin({ top: 5 })
@@ -227,6 +328,8 @@ struct Index {
           .type(ButtonType.Capsule)
           .onClick(() => {
             this.tcpConnect();
+            this.getNetworkSceneOn
+
           });
 
         Button('接受TCP消息')
@@ -245,7 +348,22 @@ struct Index {
           .type(ButtonType.Capsule)
           .onClick(() => {
             this.tcpClose();
+            this.getNetworkSceneOff
           });
+        // Button('长连接模式')
+        //   .width('90%')
+        //   .height(80)
+        //   .margin({ top: 20 })
+        //   .type(ButtonType.Capsule)
+        //   .onClick(() => {
+        //     this.isReconnectEnabled = true; // 启用重连功能
+        //     setInterval(() => {
+        //       if (this.status !== '已连接') {
+        //         this.tcpConnect();
+        //       }
+        //     }, 3000); // 5秒后重试连接，可以根据需要调整时间
+        //     this.getNetworkSceneOn();
+        //   });
       }
     }
     .height('100%')

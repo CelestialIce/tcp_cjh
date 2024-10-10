@@ -2,6 +2,7 @@ import socket
 import json
 import time
 import random
+from threading import Thread
 
 HOST = '0.0.0.0'  # 监听所有可用的接口
 PORT = 9090  # 端口号
@@ -12,6 +13,8 @@ HEARTBEAT_INTERVAL = INITIAL_HEARTBEAT_INTERVAL  # 当前心跳间隔
 
 # 记录最后接收到的心跳消息的序号
 last_received_number = 0
+# 记录等待次数
+break_times = 0
 
 def receive_heartbeat(client_socket):
     global last_received_number
@@ -41,7 +44,7 @@ def receive_heartbeat(client_socket):
 
 def send_messages(client_socket):
     time.sleep(1)
-    global last_received_number
+    global last_received_number, break_times
     message_count = last_received_number + 1
     start_time = time.time()
 
@@ -50,14 +53,15 @@ def send_messages(client_socket):
             message = {
                 'number': message_count,
                 'time': time.time() * 1000,
+                'break': break_times,
                 'message': 'X' * MESSAGE_SIZE
             }
             message_str = json.dumps(message)
             client_socket.sendall(message_str.encode('utf-8'))
-            print(f'Sent message {message_count}')
+            print(f'Sent message {message_count} , break times {break_times}')
 
             # 随机间隔 0.1 到 60 分钟
-            interval = random.uniform(0.1, 5) * 1  # 转换为秒
+            interval = random.uniform(0.1, 4) * 1  # 转换为秒
             time.sleep(interval)
             message_count += 1
 
@@ -69,6 +73,7 @@ def send_messages(client_socket):
         print("Client disconnected.")
 
 def start_server(host=HOST, port=PORT):
+    global break_times
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind((host, port))
@@ -81,7 +86,6 @@ def start_server(host=HOST, port=PORT):
         print(f"Connection from {addr}")
         
         # 启动两个线程或进程，一个用于接收心跳包，一个用于发送消息
-        from threading import Thread
         receive_thread = Thread(target=receive_heartbeat, args=(client_socket,))
         send_thread = Thread(target=send_messages, args=(client_socket,))
         
@@ -92,6 +96,7 @@ def start_server(host=HOST, port=PORT):
         receive_thread.join()
         send_thread.join()
         print("Client connection handled, waiting for a new connection...")
+        break_times += 1
 
 if __name__ == "__main__":
     start_server()
