@@ -19,15 +19,15 @@ class SocketInfo {
 interface HeartbeatData {
   type: string;
   timestamp: string;
-  receive: string;
+  receive: number
 }
 
 // 创建一个TCPSocketServer连接，返回一个TCPSocketServer对象。
 let tcp: socket.TCPSocket = socket.constructTCPSocketInstance();
 // 绑定目标IP地址和端口，进行监听
 let ipAddress: socket.NetAddress = {} as socket.NetAddress;
-ipAddress.address = "113.45.216.93";
-ipAddress.port = 9090;
+ipAddress.address = "114.116.227.106";
+ipAddress.port = 8001;
 
 @Entry
 @Component
@@ -111,7 +111,7 @@ struct Index {
     const heartbeatData: HeartbeatData = {
       type: 'heartbeat',
       timestamp: new Date().toISOString(),
-      receive: String(this.receive)
+      receive: this.receive-this.heartbeat_count
     };
 
     // 将 JSON 数据转换为字符串并编码为 Uint8Array
@@ -131,7 +131,11 @@ struct Index {
     tcp.on('message', (value: socket.SocketMessageInfo) => {
       this.message_recv = this.resolveArrayBuffer(value.message)
       this.receive += 1
+      hilog.info(0x0000, 'testTag', JSON.stringify(this.message_recv));
       let obj = JSON.parse(this.message_recv);
+      if((obj as object)?.['message']=='heartbeat'){
+        this.heartbeat_count += 1;
+      }
       this.delay = systemDateTime.getUptime(systemDateTime.TimeType.ACTIVE, false) - (obj as object)?.['time'];
       this.linkBreak =(obj as object)?.['break'];
       if (this.delays.hasKey(this.delay)) {
@@ -139,6 +143,7 @@ struct Index {
       } else {
         this.delays.set(this.delay, 1);
       }
+      this.tcpSend()
     });
     tcp.on('close', () => {
       this.status = '已断开';
@@ -153,7 +158,7 @@ struct Index {
     // 连接到目标地址
     tcp.connect(tcpConnect).then(() => {
       this.status = '已连接';
-      this.sendHeartbeat();
+      //this.sendHeartbeat();
     }).catch((err: BusinessError) => {
       this.status = '连接失败';
       // 在连接失败时，启动重连机制
