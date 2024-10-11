@@ -5,7 +5,7 @@ import random
 from threading import Thread, Lock
 
 HOST = '0.0.0.0'  # Listen on all available interfaces
-PORT = 8001  # Port number
+PORT = 9090  # Port number
 MESSAGE_SIZE = 980  # Message size
 MAX_MESSAGES = 2000  # Maximum number of messages to send
 INITIAL_HEARTBEAT_INTERVAL = 10  # Initial heartbeat interval (seconds)
@@ -13,13 +13,13 @@ heartbeat_interval = INITIAL_HEARTBEAT_INTERVAL  # Current heartbeat interval
 rtt = 1
 last_received_number = 0  # Record the last received heartbeat message number
 break_times = 0  # Record disconnection times
-lock = Lock()  # Create a lock object
+# lock = Lock()  # Create a lock object
 
 def send_heartbeat(client_socket):
     global last_received_number, heartbeat_interval, rtt
     while True:
         try:
-            time.sleep(heartbeat_interval)
+            time.sleep(heartbeat_interval/20)
             msg = {
                 'number': last_received_number,
                 'time': time.time() * 1000,

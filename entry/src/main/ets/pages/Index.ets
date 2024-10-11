@@ -26,8 +26,8 @@ interface HeartbeatData {
 let tcp: socket.TCPSocket = socket.constructTCPSocketInstance();
 // 绑定目标IP地址和端口，进行监听
 let ipAddress: socket.NetAddress = {} as socket.NetAddress;
-ipAddress.address = "114.116.227.106";
-ipAddress.port = 8001;
+ipAddress.address = "113.45.216.93";
+ipAddress.port = 9090;
 
 @Entry
 @Component
@@ -35,6 +35,7 @@ struct Index {
   @State message_send: string = 'Hello World';
   @State message_recv: string = '';
   @State status: string = '未连接';
+  @State statu:number = 0;
   @State received_count: number = 0;
   @State sequence_number: number = 0; // Initialize sequence_number
   @State heartbeat_count: number = 0;
@@ -111,7 +112,7 @@ struct Index {
     const heartbeatData: HeartbeatData = {
       type: 'heartbeat',
       timestamp: new Date().toISOString(),
-      receive: this.receive-this.heartbeat_count
+      receive: this.receive
     };
 
     // 将 JSON 数据转换为字符串并编码为 Uint8Array
@@ -156,27 +157,57 @@ struct Index {
     tcpConnect.address = ipAddress;
     tcpConnect.timeout = 6000;
     // 连接到目标地址
-    tcp.connect(tcpConnect).then(() => {
-      this.status = '已连接';
-      //this.sendHeartbeat();
-    }).catch((err: BusinessError) => {
-      this.status = '连接失败';
-      // 在连接失败时，启动重连机制
-      this.reconnectTimer = setInterval(() => {
-        if (this.status !== '已连接' && this.isReconnectEnabled) {
-          this.tcpClose();
-          this.tcpConnect();
-        }
-      }, 3000); // 重试间隔时间// 自动重试逻辑，延迟 5 秒后重新尝试连接
+    // 尝试连接的方法
+    tcp.connect(tcpConnect)
+      .then(() => {
+        this.status = '已连接';
+        this.statu = 0;
+        // 可以在成功连接后调用心跳函数
+        // this.sendHeartbeat();
+      })
+      .catch((err: BusinessError) => {
+        this.status = JSON.stringify(err);
+        this.statu = 1;
+        // 在连接失败时，启动重连机制
+        const tryReconnect = () => {
+          setTimeout(() => {
+            if ((this.status !== '已连接' || this.statu == 1) && this.isReconnectEnabled) {
+              this.tcpClose(); // 关闭之前的连接，清理状态
+              this.tcpConnect(); // 尝试重新连接
+            }
 
+            // 如果仍然没有连接成功，继续重试
+            if (this.status !== '已连接') {
+              tryReconnect(); // 递归调用以进行下一次尝试
+            }
+          }, 3000); // 等待3秒后重试
+        };
 
-      // setInterval(() => {
-      //   if (this.status !== '已连接' && this.isReconnectEnabled) {
-      //     this.tcpClose();
-      //     this.tcpConnect();
-      //   }
-      // }, 3000); // 5秒后重试连接，可以根据需要调整时间
-    });
+        // 启动第一次重连尝试
+        tryReconnect();
+      });
+
+    // tcp.connect(tcpConnect).then(() => {
+    //   this.status = '已连接';
+    //   //this.sendHeartbeat();
+    // }).catch((err: BusinessError) => {
+    //   this.status = JSON.stringify(err);
+    //   // 在连接失败时，启动重连机制
+    //   this.reconnectTimer = setInterval(() => {
+    //     if (this.status !== '已连接' && this.isReconnectEnabled) {
+    //       this.tcpClose();
+    //       this.tcpConnect();
+    //     }
+    //   }, 3000); // 重试间隔时间// 自动重试逻辑，延迟 5 秒后重新尝试连接
+    //
+    //
+    //   // setInterval(() => {
+    //   //   if (this.status !== '已连接' && this.isReconnectEnabled) {
+    //   //     this.tcpClose();
+    //   //     this.tcpConnect();
+    //   //   }
+    //   // }, 3000); // 5秒后重试连接，可以根据需要调整时间
+    // });
   }
 
   tcpClose() {
@@ -355,20 +386,21 @@ struct Index {
             this.tcpClose();
             this.getNetworkSceneOff
           });
-        // Button('长连接模式')
-        //   .width('90%')
-        //   .height(80)
-        //   .margin({ top: 20 })
-        //   .type(ButtonType.Capsule)
-        //   .onClick(() => {
-        //     this.isReconnectEnabled = true; // 启用重连功能
-        //     setInterval(() => {
-        //       if (this.status !== '已连接') {
-        //         this.tcpConnect();
-        //       }
-        //     }, 3000); // 5秒后重试连接，可以根据需要调整时间
-        //     this.getNetworkSceneOn();
-        //   });
+        Button('长连接模式')
+          .width('90%')
+          .height(80)
+          .margin({ top: 20 })
+          .type(ButtonType.Capsule)
+          .onClick(() => {
+            this.isReconnectEnabled = true; // 启用重连功能
+            this.tcpConnect();
+            // setInterval(() => {
+            //   if (this.status !== '已连接') {
+            //     this.tcpConnect();
+            //   }
+            // }, 3000); // 5秒后重试连接，可以根据需要调整时间
+            // this.getNetworkSceneOn();
+          });
       }
     }
     .height('100%')
